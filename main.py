@@ -1,7 +1,6 @@
+cat > /home/claude/mediaflow_fix/main_v3.py << 'EOF'
 """
-MediaFlow – FastAPI Backend
-Run: python main.py
-API: http://localhost:8000
+MediaFlow – FastAPI Backend v3
 """
 
 import asyncio
@@ -14,7 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-# ── Static FFmpeg ─────────────────────────────────────────────────────────────
 try:
     import static_ffmpeg
     static_ffmpeg.add_paths()
@@ -74,19 +72,22 @@ def save_history(history):
     _save_json(DATA_FILE, {"history": history})
 
 def load_settings():
-    defaults = {"quality":"1080p","format":"mp4","save_dir":str(DOWNLOAD_DIR),"max_concurrent":3,"speed_limit":None,"use_ffmpeg":True,"notifications":True,"theme":"Liquid Glass","language":"English"}
+    defaults = {"quality":"1080p","format":"mp4","save_dir":str(DOWNLOAD_DIR),
+                "max_concurrent":3,"speed_limit":None,"use_ffmpeg":True,
+                "notifications":True,"theme":"Liquid Glass","language":"English"}
     return {**defaults, **_load_json(SETTINGS_FILE, {})}
 
 def save_settings(data):
     _save_json(SETTINGS_FILE, data)
 
+# Format pakai fallback bestvideo+bestaudio/best agar selalu ada
 QUALITY_MAP = {
-    "4K":"bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-    "1440p":"bestvideo[height<=1440]+bestaudio/best[height<=1440]",
-    "1080p":"bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-    "720p":"bestvideo[height<=720]+bestaudio/best[height<=720]",
-    "480p":"bestvideo[height<=480]+bestaudio/best[height<=480]",
-    "360p":"bestvideo[height<=360]+bestaudio/best[height<=360]",
+    "4K":    "bestvideo[height<=2160]+bestaudio/best[height<=2160]/bestvideo+bestaudio/best",
+    "1440p": "bestvideo[height<=1440]+bestaudio/best[height<=1440]/bestvideo+bestaudio/best",
+    "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best",
+    "720p":  "bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best",
+    "480p":  "bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best",
+    "360p":  "bestvideo[height<=360]+bestaudio/best[height<=360]/bestvideo+bestaudio/best",
 }
 
 download_progress: Dict[str, dict] = {}
@@ -104,12 +105,15 @@ def _make_hook(download_id):
         if not active_flags.get(download_id, True):
             raise yt_dlp.utils.DownloadError("Cancelled by user")
         if d["status"] == "downloading":
-            dl = d.get("downloaded_bytes") or 0
+            dl  = d.get("downloaded_bytes") or 0
             tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             download_progress[download_id].update({
-                "status":"downloading","progress":round(dl/tot*100,1) if tot else 0,
-                "downloaded_bytes":dl,"total_bytes":tot,
-                "speed":d.get("speed") or 0,"eta":d.get("eta") or 0,
+                "status": "downloading",
+                "progress": round(dl / tot * 100, 1) if tot else 0,
+                "downloaded_bytes": dl,
+                "total_bytes": tot,
+                "speed": d.get("speed") or 0,
+                "eta": d.get("eta") or 0,
             })
         elif d["status"] == "finished":
             download_progress[download_id]["status"] = "converting"
@@ -119,40 +123,65 @@ def _build_opts(download_id, fmt, quality, out_dir):
     pps = []
     if fmt == "mp3":
         fmt_str = "bestaudio/best"
-        pps.append({"key":"FFmpegExtractAudio","preferredcodec":"mp3","preferredquality":"320"})
+        pps.append({"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "320"})
     else:
         fmt_str = QUALITY_MAP.get(quality, QUALITY_MAP["1080p"])
-        pps.append({"key":"FFmpegVideoConvertor","preferedformat":"mp4"})
-    opts = {**_base_opts(),"format":fmt_str,"outtmpl":str(Path(out_dir)/"%(title).80s.%(ext)s"),
-            "progress_hooks":[_make_hook(download_id)],"postprocessors":pps,"merge_output_format":"mp4"}
+        pps.append({"key": "FFmpegVideoConvertor", "preferedformat": "mp4"})
+
+    opts = {
+        **_base_opts(),
+        "format": fmt_str,
+        "outtmpl": str(Path(out_dir) / "%(title).80s.%(ext)s"),
+        "progress_hooks": [_make_hook(download_id)],
+        "postprocessors": pps,
+        "merge_output_format": "mp4",
+        "format_sort": ["res", "ext:mp4:m4a"],
+    }
     if FFMPEG_DIR and FFMPEG_DIR != "system":
         opts["ffmpeg_location"] = FFMPEG_DIR
     return opts
 
 def _fetch_info_sync(url):
     with yt_dlp.YoutubeDL(_base_opts()) as ydl:
-        info = ydl.extract_info(url, download=False)
-        heights = sorted({f.get("height") for f in info.get("formats",[]) if f.get("height") and f.get("vcodec")!="none"},reverse=True)
-        return {"title":info.get("title","Unknown"),"duration":info.get("duration",0),
-                "thumbnail":info.get("thumbnail",""),"uploader":info.get("uploader",""),
-                "platform":info.get("extractor_key",""),"available_qualities":[f"{h}p" for h in heights if h][:6] or ["720p"],"url":url}
+        info    = ydl.extract_info(url, download=False)
+        heights = sorted(
+            {f.get("height") for f in info.get("formats", [])
+             if f.get("height") and f.get("vcodec") != "none"},
+            reverse=True,
+        )
+        return {
+            "title":               info.get("title", "Unknown"),
+            "duration":            info.get("duration", 0),
+            "thumbnail":           info.get("thumbnail", ""),
+            "uploader":            info.get("uploader", ""),
+            "platform":            info.get("extractor_key", ""),
+            "available_qualities": [f"{h}p" for h in heights if h][:6] or ["720p"],
+            "url":                 url,
+        }
 
 def _run_download(download_id, url, fmt, quality, out_dir):
     active_flags[download_id] = True
     try:
         with yt_dlp.YoutubeDL(_build_opts(download_id, fmt, quality, out_dir)) as ydl:
-            info = ydl.extract_info(url, download=True)
+            info     = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             if fmt == "mp3":
                 filename = str(Path(filename).with_suffix(".mp3"))
-            fpath = Path(filename)
+            fpath     = Path(filename)
             file_size = fpath.stat().st_size if fpath.exists() else 0
-            download_progress[download_id].update({"status":"done","progress":100,"filename":filename,"file_size":file_size,"completed_at":datetime.now().isoformat()})
+            download_progress[download_id].update({
+                "status": "done", "progress": 100,
+                "filename": filename, "file_size": file_size,
+                "completed_at": datetime.now().isoformat(),
+            })
             history = load_history()
             history.insert(0, dict(download_progress[download_id]))
             save_history(history[:200])
     except Exception as exc:
-        download_progress[download_id].update({"status":"cancelled" if "Cancelled" in str(exc) else "error","error":str(exc)})
+        download_progress[download_id].update({
+            "status": "cancelled" if "Cancelled" in str(exc) else "error",
+            "error":  str(exc),
+        })
     finally:
         active_flags.pop(download_id, None)
 
@@ -160,14 +189,18 @@ class InfoReq(BaseModel):
     url: str
 
 class DownloadReq(BaseModel):
-    url: str
-    format: str = "mp4"
-    quality: str = "1080p"
+    url:        str
+    format:     str = "mp4"
+    quality:    str = "1080p"
     output_dir: Optional[str] = None
 
 @app.get("/api/health")
 async def health():
-    return {"ok":True,"ffmpeg":FFMPEG_DIR is not None or bool(shutil.which("ffmpeg")),"cookies":get_cookies_path() is not None}
+    return {
+        "ok":      True,
+        "ffmpeg":  FFMPEG_DIR is not None or bool(shutil.which("ffmpeg")),
+        "cookies": get_cookies_path() is not None,
+    }
 
 @app.post("/api/info")
 async def get_info(req: InfoReq):
@@ -179,16 +212,25 @@ async def get_info(req: InfoReq):
 @app.post("/api/download")
 async def start_download(req: DownloadReq):
     download_id = uuid.uuid4().hex[:8]
-    out_dir = req.output_dir or load_settings().get("save_dir", str(DOWNLOAD_DIR))
+    out_dir     = req.output_dir or load_settings().get("save_dir", str(DOWNLOAD_DIR))
     meta = {}
     try:
         meta = await asyncio.get_event_loop().run_in_executor(None, _fetch_info_sync, req.url)
     except:
         pass
-    download_progress[download_id] = {"id":download_id,"status":"queued","progress":0,"speed":0,"eta":0,
-        "downloaded_bytes":0,"total_bytes":0,"title":meta.get("title",""),"thumbnail":meta.get("thumbnail",""),
-        "platform":meta.get("platform",""),"format":req.format,"quality":req.quality,"url":req.url,"started_at":datetime.now().isoformat()}
-    threading.Thread(target=_run_download, args=(download_id,req.url,req.format,req.quality,out_dir), daemon=True).start()
+    download_progress[download_id] = {
+        "id": download_id, "status": "queued", "progress": 0,
+        "speed": 0, "eta": 0, "downloaded_bytes": 0, "total_bytes": 0,
+        "title": meta.get("title", ""), "thumbnail": meta.get("thumbnail", ""),
+        "platform": meta.get("platform", ""), "format": req.format,
+        "quality": req.quality, "url": req.url,
+        "started_at": datetime.now().isoformat(),
+    }
+    threading.Thread(
+        target=_run_download,
+        args=(download_id, req.url, req.format, req.quality, out_dir),
+        daemon=True,
+    ).start()
     return {"download_id": download_id}
 
 @app.delete("/api/download/{download_id}")
@@ -211,9 +253,11 @@ async def list_files():
     files = []
     for f in sorted(DOWNLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
         if f.is_file() and not f.name.startswith("."):
-            files.append({"name":f.name,"path":str(f),"size":f.stat().st_size,
-                "modified":datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-                "type":"audio" if f.suffix.lower() in {".mp3",".m4a",".ogg",".flac",".wav"} else "video"})
+            files.append({
+                "name": f.name, "path": str(f), "size": f.stat().st_size,
+                "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                "type": "audio" if f.suffix.lower() in {".mp3",".m4a",".ogg",".flac",".wav"} else "video",
+            })
     return files
 
 @app.delete("/api/files/{filename}")
@@ -250,7 +294,7 @@ async def ws_progress(ws: WebSocket, download_id: str):
             prog = download_progress.get(download_id)
             if prog:
                 await ws.send_json(prog)
-                if prog.get("status") in ("done","error","cancelled"):
+                if prog.get("status") in ("done", "error", "cancelled"):
                     await asyncio.sleep(0.3)
                     break
             await asyncio.sleep(0.35)
@@ -261,5 +305,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     print(f"🍑 MediaFlow API → http://0.0.0.0:{port}")
-    print(f"🍪 Cookies       → {get_cookies_path() or 'none (YouTube may block)'}")
+    print(f"🍪 Cookies       → {get_cookies_path() or 'none'}")
     uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
+EOF
+echo "done"
