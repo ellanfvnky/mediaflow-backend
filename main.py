@@ -1,4 +1,3 @@
-cat > /home/claude/mediaflow_fix/main_v3.py << 'EOF'
 """
 MediaFlow – FastAPI Backend v3
 """
@@ -307,5 +306,3 @@ if __name__ == "__main__":
     print(f"🍑 MediaFlow API → http://0.0.0.0:{port}")
     print(f"🍪 Cookies       → {get_cookies_path() or 'none'}")
     uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
-EOF
-echo "done"
