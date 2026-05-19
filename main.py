@@ -122,7 +122,8 @@ def _build_opts(download_id, fmt, quality, out_dir):
     pps = []
     if fmt == "mp3":
         fmt_str = "bestaudio/best"
-        pps.append({"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "320"})
+        bitrate = quality.replace("kbps","") if "kbps" in quality else "320"
+        pps.append({"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": bitrate})
     else:
         fmt_str = QUALITY_MAP.get(quality, QUALITY_MAP["1080p"])
         pps.append({"key": "FFmpegVideoConvertor", "preferedformat": "mp4"})
